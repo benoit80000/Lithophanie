@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 
 const MAX_GRID_SIZE = 100; // résolution interne pour le maillage STL
 
@@ -180,7 +180,8 @@ function generateFlatLithophaneStl(heightMap, gridWidth, gridHeight, sizeXmm, si
 
 export default function LithophaneMaker() {
   const [imageSrc, setImageSrc] = useState(null);
-  const [previewUrl, setPreviewUrl] = useState(null);
+  const [previewUrl, setPreviewUrl] = useState(null);        // image originale
+  const [previewLithoUrl, setPreviewLithoUrl] = useState(null); // rendu lithophanie
   const [isGenerating, setIsGenerating] = useState(false);
   const [shape, setShape] = useState('frame');
   const [settings, setSettings] = useState({
@@ -207,17 +208,78 @@ export default function LithophaneMaker() {
     setSettings((prev) => ({ ...prev, [key]: value }));
   };
 
+  // 🪟 Génération de la fenêtre de rendu (simulation lithophanie)
+  useEffect(() => {
+    if (!imageSrc) {
+      setPreviewLithoUrl(null);
+      return;
+    }
+
+    let cancelled = false;
+
+    const makePreview = async () => {
+      try {
+        const { heightMap, width, height } = await generateHeightMapFromImage(
+          imageSrc,
+          settings.minThickness,
+          settings.maxThickness
+        );
+
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        const imgData = ctx.createImageData(width, height);
+
+        // On simule le rendu rétro-éclairé :
+        // - zones fines = plus claires
+        // - zones épaisses = plus sombres
+        const minT = settings.minThickness;
+        const maxT = settings.maxThickness;
+        const range = Math.max(0.0001, maxT - minT);
+
+        for (let y = 0; y < height; y++) {
+          for (let x = 0; x < width; x++) {
+            const t = heightMap[y][x];
+            const tNorm = (t - minT) / range; // 0 = min, 1 = max
+            const brightness = 1 - tNorm;     // min épaisseur → plus lumineux
+            const b = Math.round(255 * brightness);
+            const i = (y * width + x) * 4;
+            imgData.data[i] = b;
+            imgData.data[i + 1] = b;
+            imgData.data[i + 2] = b;
+            imgData.data[i + 3] = 255;
+          }
+        }
+
+        ctx.putImageData(imgData, 0, 0);
+        const url = canvas.toDataURL('image/png');
+        if (!cancelled) {
+          setPreviewLithoUrl(url);
+        }
+      } catch (err) {
+        console.error('Erreur prévisualisation lithophanie:', err);
+      }
+    };
+
+    makePreview();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [imageSrc, settings.minThickness, settings.maxThickness]);
+
   const handleExportStl = async () => {
     if (!imageSrc) {
-      alert('Merci de charger d\'abord une image.');
+      alert("Merci de charger d'abord une image.");
       return;
     }
 
     if (shape !== 'frame') {
       alert(
-        "Actuellement, l\'export STL avancé est implémenté pour le cadre plat. " +
-          "Les autres formes (boule, abat-jour...) sortiront bientôt – pour l\'instant, " +
-          "l\'export génère une plaque plate."
+        "Actuellement, l'export STL avancé est implémenté pour le cadre plat. " +
+          "Les autres formes (boule, abat-jour...) sortiront bientôt – pour l'instant, " +
+          "l'export génère une plaque plate."
       );
     }
 
@@ -248,7 +310,7 @@ export default function LithophaneMaker() {
       URL.revokeObjectURL(url);
     } catch (err) {
       console.error(err);
-      alert("Erreur lors de la génération du STL. Vérifie l\'image et réessaie.");
+      alert("Erreur lors de la génération du STL. Vérifie l'image et réessaie.");
     } finally {
       setIsGenerating(false);
     }
@@ -264,12 +326,30 @@ export default function LithophaneMaker() {
             <input type="file" accept="image/*" onChange={handleFileChange} />
             <span>Choisir une image…</span>
           </label>
+
           {previewUrl && (
             <div className="preview-wrapper">
-              <h3>Aperçu</h3>
+              <h3>Aperçu original</h3>
               <img src={previewUrl} alt="Prévisualisation" className="preview-image" />
             </div>
           )}
+
+          <div className="preview-wrapper" style={{ marginTop: 12 }}>
+            <h3>Rendu lithophanie (simulation)</h3>
+            {previewLithoUrl ? (
+              <img
+                src={previewLithoUrl}
+                alt="Rendu lithophanie"
+                className="preview-image"
+                style={{ background: 'black' }}
+              />
+            ) : (
+              <p className="hint">
+                Charge une image pour voir ici une simulation de la lithophanie (comme si elle était
+                rétro-éclairée).
+              </p>
+            )}
+          </div>
         </div>
 
         <div className="litho-panel">
@@ -386,7 +466,7 @@ export default function LithophaneMaker() {
           <li>✔️ Hauteur de couche : 0.10–0.16mm (0.12mm idéal)</li>
           <li>✔️ Infill : 100% (obligatoire pour les lithophanies)</li>
           <li>✔️ Parois : 5–7 murs minimum</li>
-          <li>✔️ Orientation : litophanie verticale face au ventilateur</li>
+          <li>✔️ Orientation : lithophanie verticale face au ventilateur</li>
         </ul>
       </div>
     </section>
