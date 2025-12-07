@@ -1,0 +1,243 @@
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  background: #050816;
+  color: #f5f5f5;
+}
+
+.app-root {
+  min-height: 100vh;
+  display: flex;
+  justify-content: center;
+  padding: 24px;
+}
+
+.app-container {
+  width: 100%;
+  max-width: 1100px;
+  background: radial-gradient(circle at top, #1a1f3b 0, #050816 55%);
+  border-radius: 24px;
+  padding: 24px;
+  box-shadow:
+    0 18px 45px rgba(0, 0, 0, 0.6),
+    0 0 0 1px rgba(255, 255, 255, 0.04);
+}
+
+.app-header {
+  text-align: center;
+  margin-bottom: 24px;
+}
+
+.app-header h1 {
+  font-size: 2rem;
+  margin: 0 0 8px;
+}
+
+.app-header p {
+  margin: 0;
+  opacity: 0.85;
+}
+
+.app-footer {
+  margin-top: 24px;
+  text-align: center;
+  font-size: 0.85rem;
+  opacity: 0.7;
+}
+
+.litho-section {
+  margin-top: 8px;
+}
+
+.litho-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1.2fr);
+  gap: 18px;
+}
+
+@media (max-width: 900px) {
+  .litho-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.litho-panel {
+  background: rgba(8, 11, 30, 0.96);
+  border-radius: 18px;
+  padding: 16px 18px 18px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.55);
+}
+
+.litho-panel h2 {
+  margin: 0 0 4px;
+  font-size: 1.2rem;
+}
+
+.litho-panel h3 {
+  margin: 10px 0 6px;
+  font-size: 1rem;
+}
+
+.litho-panel p {
+  margin: 0 0 10px;
+  font-size: 0.9rem;
+  opacity: 0.9;
+}
+
+.file-input-label {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-radius: 999px;
+  border: 1px dashed rgba(255, 255, 255, 0.4);
+  cursor: pointer;
+  font-size: 0.9rem;
+  margin-top: 4px;
+  background: rgba(12, 18, 46, 0.9);
+}
+
+.file-input-label input {
+  display: none;
+}
+
+.preview-wrapper {
+  margin-top: 14px;
+}
+
+.preview-image {
+  display: block;
+  max-width: 100%;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
+}
+
+.shape-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.shape-btn {
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  padding: 7px 10px;
+  font-size: 0.9rem;
+  background: rgba(12, 18, 46, 0.9);
+  color: #f5f5f5;
+  cursor: pointer;
+  text-align: left;
+  transition: transform 0.08s ease, background 0.1s ease, box-shadow 0.1s ease;
+}
+
+.shape-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.5);
+}
+
+.shape-btn.active {
+  background: linear-gradient(135deg, #38bdf8, #22c55e);
+  border-color: transparent;
+}
+
+.settings-group {
+  margin-top: 12px;
+}
+
+.settings-row {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.settings-row label {
+  flex: 1;
+  min-width: 120px;
+  font-size: 0.85rem;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.settings-row input {
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.26);
+  padding: 6px 10px;
+  background: rgba(6, 10, 32, 0.95);
+  color: #f5f5f5;
+  font-size: 0.9rem;
+}
+
+.settings-row input:focus {
+  outline: none;
+  border-color: #38bdf8;
+  box-shadow: 0 0 0 1px rgba(56, 189, 248, 0.5);
+}
+
+.hint {
+  margin-top: 4px;
+  font-size: 0.8rem;
+  opacity: 0.8;
+}
+
+.actions {
+  margin-top: 16px;
+}
+
+.export-btn {
+  border-radius: 999px;
+  border: none;
+  padding: 9px 16px;
+  font-size: 0.95rem;
+  background: linear-gradient(135deg, #22c55e, #38bdf8);
+  color: #020617;
+  cursor: pointer;
+  font-weight: 600;
+  box-shadow: 0 12px 24px rgba(34, 197, 94, 0.4);
+  transition: transform 0.08s ease, box-shadow 0.08s ease, filter 0.08s ease;
+}
+
+.export-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 16px 30px rgba(56, 189, 248, 0.4);
+  filter: brightness(1.02);
+}
+
+.export-btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+  box-shadow: none;
+}
+
+.print-tips {
+  margin-top: 18px;
+  background: rgba(8, 11, 30, 0.96);
+  border-radius: 18px;
+  padding: 14px 16px 16px;
+  border: 1px dashed rgba(148, 163, 184, 0.7);
+  font-size: 0.9rem;
+}
+
+.print-tips h2 {
+  margin: 0 0 8px;
+  font-size: 1rem;
+}
+
+.print-tips ul {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.print-tips li {
+  margin-bottom: 4px;
+}
