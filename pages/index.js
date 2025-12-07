@@ -1,6 +1,5 @@
 import Head from 'next/head';
 import LithophaneMaker from '../components/LithophaneMaker';
-import '../styles/globals.css';
 
 export default function Home() {
   return (
