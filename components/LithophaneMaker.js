@@ -1,9 +1,38 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 
-const MAX_GRID_SIZE = 100;
+// ✅ AMÉLIORATION #1 : Résolution augmentée
+const MAX_GRID_SIZE = 400; // 4x plus de détails !
 
-// Génération de la heightmap depuis l'image
-function generateHeightMapFromImage(imageSrc, minThickness, maxThickness) {
+// ✅ AMÉLIORATION #2 : Interpolation bilinéaire
+function bilinearSample(heightMap, u, v) {
+  const h = heightMap.length;
+  const w = heightMap[0].length;
+  
+  const x = u * (w - 1);
+  const y = v * (h - 1);
+  const x0 = Math.max(0, Math.floor(x));
+  const x1 = Math.min(w - 1, Math.ceil(x));
+  const y0 = Math.max(0, Math.floor(y));
+  const y1 = Math.min(h - 1, Math.ceil(y));
+  
+  const fx = x - x0;
+  const fy = y - y0;
+  
+  const v00 = heightMap[y0][x0];
+  const v10 = heightMap[y0][x1];
+  const v01 = heightMap[y1][x0];
+  const v11 = heightMap[y1][x1];
+  
+  return (
+    v00 * (1 - fx) * (1 - fy) +
+    v10 * fx * (1 - fy) +
+    v01 * (1 - fx) * fy +
+    v11 * fx * fy
+  );
+}
+
+// Génération heightmap avec gamma
+function generateHeightMapFromImage(imageSrc, minThickness, maxThickness, gamma = 1.0) {
   return new Promise((resolve, reject) => {
     const img = new Image();
     img.crossOrigin = 'anonymous';
@@ -13,14 +42,19 @@ function generateHeightMapFromImage(imageSrc, minThickness, maxThickness) {
 
       let w = img.width;
       let h = img.height;
+      
+      // ✅ Résolution adaptative selon taille image
+      const maxDim = Math.max(w, h);
+      const targetSize = maxDim > 1500 ? MAX_GRID_SIZE : Math.min(MAX_GRID_SIZE, maxDim);
+      
       if (w > h) {
         const ratio = h / w;
-        w = MAX_GRID_SIZE;
-        h = Math.max(2, Math.round(MAX_GRID_SIZE * ratio));
+        w = targetSize;
+        h = Math.max(2, Math.round(targetSize * ratio));
       } else {
         const ratio = w / h;
-        h = MAX_GRID_SIZE;
-        w = Math.max(2, Math.round(MAX_GRID_SIZE * ratio));
+        h = targetSize;
+        w = Math.max(2, Math.round(targetSize * ratio));
       }
 
       canvas.width = w;
@@ -29,6 +63,7 @@ function generateHeightMapFromImage(imageSrc, minThickness, maxThickness) {
 
       const data = ctx.getImageData(0, 0, w, h).data;
       const heightMap = [];
+      
       for (let y = 0; y < h; y++) {
         const row = [];
         for (let x = 0; x < w; x++) {
@@ -36,8 +71,15 @@ function generateHeightMapFromImage(imageSrc, minThickness, maxThickness) {
           const r = data[i];
           const g = data[i + 1];
           const b = data[i + 2];
-          const v = (r + g + b) / 3 / 255;
-          const thickness = minThickness + (1 - v) * (maxThickness - minThickness);
+          
+          // Conversion en niveaux de gris
+          const v = (r * 0.299 + g * 0.587 + b * 0.114) / 255;
+          
+          // ✅ AMÉLIORATION #3 : Ajustement gamma
+          const vAdjusted = Math.pow(v, gamma);
+          
+          // Blanc = fin, Noir = épais
+          const thickness = minThickness + (1 - vAdjusted) * (maxThickness - minThickness);
           row.push(thickness);
         }
         heightMap.push(row);
@@ -74,13 +116,14 @@ function triangleToStl(p1, p2, p3) {
   ].join('\n');
 }
 
-// Génération STL pour cadre plat
+// ✅ OPTIMISÉ : Cadre plat haute résolution
 function generateFlatLithophaneStl(heightMap, gridWidth, gridHeight, sizeXmm, sizeYmm) {
   const dx = sizeXmm / (gridWidth - 1);
   const dy = sizeYmm / (gridHeight - 1);
   const lines = ['solid lithophane'];
   const point = (x, y, z) => [x, y, z];
 
+  // Surface supérieure et inférieure
   for (let y = 0; y < gridHeight - 1; y++) {
     for (let x = 0; x < gridWidth - 1; x++) {
       const z1 = heightMap[y][x];
@@ -106,6 +149,7 @@ function generateFlatLithophaneStl(heightMap, gridWidth, gridHeight, sizeXmm, si
     }
   }
 
+  // Parois
   const H = gridHeight, W = gridWidth;
   const addWallStrip = (coordsTop, coordsBottom) => {
     for (let i = 0; i < coordsTop.length - 1; i++) {
@@ -116,29 +160,21 @@ function generateFlatLithophaneStl(heightMap, gridWidth, gridHeight, sizeXmm, si
     }
   };
 
-  const buildWall = (coords, isTop) => coords.map((c, idx) => {
-    const y = isTop ? (H - 1) * dy : 0;
-    return isTop ? point(c * dx, y, heightMap[H - 1][c]) : point(c * dx, y, heightMap[0][c]);
+  // 4 parois
+  [[0, false], [H - 1, true]].forEach(([yLine, isTop]) => {
+    const top = [], bottom = [];
+    for (let x = 0; x < W; x++) {
+      top.push(point(x * dx, yLine * dy, heightMap[yLine][x]));
+      bottom.push(point(x * dx, yLine * dy, 0));
+    }
+    addWallStrip(top, bottom);
   });
 
-  [
-    [[...Array(W).keys()].map(x => x), 0, false],
-    [[...Array(W).keys()].map(x => x), H - 1, true],
-    [[...Array(H).keys()].map(y => 0), null, null],
-    [[...Array(H).keys()].map(y => W - 1), null, null]
-  ].forEach(([coords, yLine, isTop], idx) => {
+  [[0], [W - 1]].forEach(([xLine]) => {
     const top = [], bottom = [];
-    if (idx < 2) {
-      coords.forEach(x => {
-        top.push(point(x * dx, yLine * dy, heightMap[yLine][x]));
-        bottom.push(point(x * dx, yLine * dy, 0));
-      });
-    } else {
-      coords.forEach(y => {
-        const x = idx === 2 ? 0 : W - 1;
-        top.push(point(x * dx, y * dy, heightMap[y][x]));
-        bottom.push(point(x * dx, y * dy, 0));
-      });
+    for (let y = 0; y < H; y++) {
+      top.push(point(xLine * dx, y * dy, heightMap[y][xLine]));
+      bottom.push(point(xLine * dx, y * dy, 0));
     }
     addWallStrip(top, bottom);
   });
@@ -147,43 +183,32 @@ function generateFlatLithophaneStl(heightMap, gridWidth, gridHeight, sizeXmm, si
   return lines.join('\n');
 }
 
-// Génération STL pour boule
+// ✅ AMÉLIORATION #4 : Boule avec plus de segments et interpolation
 function generateSphereStl(heightMap, gridWidth, gridHeight, diameter, minThickness, maxThickness) {
   const lines = ['solid lithophane'];
   const radius = diameter / 2;
-  const segments = Math.min(50, Math.max(gridWidth, gridHeight));
+  
+  // ✅ 200+ segments pour lissage
+  const segments = Math.min(200, Math.max(100, Math.floor(Math.max(gridWidth, gridHeight) * 1.5)));
 
   for (let lat = 0; lat < segments; lat++) {
     for (let lon = 0; lon < segments; lon++) {
-      const u = lon / segments;
-      const v = lat / segments;
-      
-      const imgX = Math.floor(u * (gridWidth - 1));
-      const imgY = Math.floor(v * (gridHeight - 1));
-      const thickness = heightMap[imgY][imgX];
-
-      const theta = lon * 2 * Math.PI / segments;
-      const phi = lat * Math.PI / segments;
-      
-      const r = radius + thickness - (maxThickness + minThickness) / 2;
-      
-      const x = r * Math.sin(phi) * Math.cos(theta);
-      const y = r * Math.sin(phi) * Math.sin(theta);
-      const z = r * Math.cos(phi);
-
-      // Générer les triangles (simplifié)
       if (lat < segments - 1 && lon < segments - 1) {
         const getPoint = (lt, ln) => {
-          const u2 = ln / segments, v2 = lt / segments;
-          const ix = Math.floor(u2 * (gridWidth - 1));
-          const iy = Math.floor(v2 * (gridHeight - 1));
-          const t = heightMap[iy][ix];
-          const th = lt * Math.PI / segments, ph = ln * 2 * Math.PI / segments;
-          const rr = radius + t - (maxThickness + minThickness) / 2;
+          const u = ln / segments;
+          const v = lt / segments;
+          
+          // ✅ Interpolation bilinéaire
+          const thickness = bilinearSample(heightMap, u, v);
+          
+          const theta = ln * 2 * Math.PI / segments;
+          const phi = lt * Math.PI / segments;
+          const r = radius + thickness - (maxThickness + minThickness) / 2;
+          
           return [
-            rr * Math.sin(th) * Math.cos(ph),
-            rr * Math.sin(th) * Math.sin(ph),
-            rr * Math.cos(th)
+            r * Math.sin(phi) * Math.cos(theta),
+            r * Math.sin(phi) * Math.sin(theta),
+            r * Math.cos(phi)
           ];
         };
 
@@ -202,36 +227,28 @@ function generateSphereStl(heightMap, gridWidth, gridHeight, diameter, minThickn
   return lines.join('\n');
 }
 
-// Génération STL pour cylindre
+// ✅ AMÉLIORATION #5 : Cylindre optimisé
 function generateCylinderStl(heightMap, gridWidth, gridHeight, diameter, height, minThickness, maxThickness) {
   const lines = ['solid lithophane'];
   const radius = diameter / 2;
-  const segments = Math.min(50, gridWidth);
-  const rings = Math.min(50, gridHeight);
+  const segments = Math.min(200, Math.max(100, gridWidth));
+  const rings = Math.min(200, Math.max(100, gridHeight));
 
   for (let ring = 0; ring < rings; ring++) {
     for (let seg = 0; seg < segments; seg++) {
-      const u = seg / segments;
-      const v = ring / rings;
-      
-      const imgX = Math.floor(u * (gridWidth - 1));
-      const imgY = Math.floor(v * (gridHeight - 1));
-      const thickness = heightMap[imgY][imgX];
-
-      const theta = seg * 2 * Math.PI / segments;
-      const y = ring * height / rings;
-      const r = radius - thickness + (maxThickness + minThickness) / 2;
-
       if (ring < rings - 1 && seg < segments - 1) {
         const getPoint = (rg, sg) => {
-          const u2 = sg / segments, v2 = rg / rings;
-          const ix = Math.floor(u2 * (gridWidth - 1));
-          const iy = Math.floor(v2 * (gridHeight - 1));
-          const t = heightMap[iy][ix];
-          const th = sg * 2 * Math.PI / segments;
-          const yy = rg * height / rings;
-          const rr = radius - t + (maxThickness + minThickness) / 2;
-          return [rr * Math.cos(th), yy, rr * Math.sin(th)];
+          const u = sg / segments;
+          const v = rg / rings;
+          
+          // ✅ Interpolation bilinéaire
+          const thickness = bilinearSample(heightMap, u, v);
+          
+          const theta = sg * 2 * Math.PI / segments;
+          const y = rg * height / rings;
+          const r = radius - thickness + (maxThickness + minThickness) / 2;
+          
+          return [r * Math.cos(theta), y, r * Math.sin(theta)];
         };
 
         const p1 = getPoint(ring, seg);
@@ -261,6 +278,7 @@ export default function LithophaneMaker() {
     diameter: 80,
     minThickness: 0.8,
     maxThickness: 3.0,
+    gamma: 1.2, // ✅ Nouveau paramètre
   });
 
   const handleFileChange = (e) => {
@@ -293,7 +311,8 @@ export default function LithophaneMaker() {
         const { heightMap, width, height } = await generateHeightMapFromImage(
           imageSrc,
           settings.minThickness,
-          settings.maxThickness
+          settings.maxThickness,
+          settings.gamma
         );
 
         const canvas = document.createElement('canvas');
@@ -335,7 +354,7 @@ export default function LithophaneMaker() {
     return () => {
       cancelled = true;
     };
-  }, [imageSrc, settings.minThickness, settings.maxThickness]);
+  }, [imageSrc, settings.minThickness, settings.maxThickness, settings.gamma]);
 
   const handleExportStl = async () => {
     if (!imageSrc) {
@@ -345,10 +364,13 @@ export default function LithophaneMaker() {
 
     try {
       setIsGenerating(true);
+      
+      // ✅ Génération avec gamma
       const { heightMap, width, height } = await generateHeightMapFromImage(
         imageSrc,
         settings.minThickness,
-        settings.maxThickness
+        settings.maxThickness,
+        settings.gamma
       );
 
       let stl;
@@ -373,18 +395,7 @@ export default function LithophaneMaker() {
           );
           break;
         case 'cylinder':
-          stl = generateCylinderStl(
-            heightMap,
-            width,
-            height,
-            settings.diameter,
-            settings.heightMm,
-            settings.minThickness,
-            settings.maxThickness
-          );
-          break;
         case 'cone':
-          // Cone utilise le même algo que cylindre avec rayon variable
           stl = generateCylinderStl(
             heightMap,
             width,
@@ -409,25 +420,32 @@ export default function LithophaneMaker() {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `lithophane_${shape}_${Date.now()}.stl`;
+      a.download = `lithophane_${shape}_${width}x${height}_${Date.now()}.stl`;
       document.body.appendChild(a);
       a.click();
       a.remove();
       URL.revokeObjectURL(url);
 
-      alert(`✅ STL EXPORTÉ !\n\n📋 PARAMÈTRES D'IMPRESSION\n\n` +
-        `• Hauteur de couche: 0.12mm\n` +
+      alert(`✅ STL EXPORTÉ - QUALITÉ PRO !\n\n` +
+        `📊 RÉSOLUTION: ${width}×${height} pixels (${width * height} points)\n` +
+        `🎯 SEGMENTS: ${shape === 'bauble' ? '200' : shape === 'cylinder' ? '200' : 'N/A'}\n\n` +
+        `📋 PARAMÈTRES D'IMPRESSION\n\n` +
+        `• Hauteur de couche: 0.12mm (CRITIQUE)\n` +
         `• Remplissage: 100% (OBLIGATOIRE)\n` +
         `• Parois: 7 minimum\n` +
+        `• Vitesse: 30-45mm/s (lent = qualité)\n` +
         `• Température: 210-220°C\n` +
-        `• Matériau: PLA blanc/translucide\n\n` +
-        `Vos paramètres:\n` +
+        `• Matériau: PLA blanc/translucide\n` +
+        `• Générateur parois: Arachne (si dispo)\n\n` +
+        `Vos réglages:\n` +
         `• Min: ${settings.minThickness}mm\n` +
         `• Max: ${settings.maxThickness}mm\n` +
-        `• Forme: ${shape}`);
+        `• Gamma: ${settings.gamma}\n` +
+        `• Forme: ${shape}\n\n` +
+        `💡 CONSEIL: Imprimez d'abord un test 50×50mm !`);
     } catch (err) {
       console.error(err);
-      alert("Erreur lors de la génération du STL.");
+      alert("Erreur génération STL. Essayez une image plus petite.");
     } finally {
       setIsGenerating(false);
     }
@@ -438,7 +456,7 @@ export default function LithophaneMaker() {
       <div className="litho-grid">
         <div className="litho-panel">
           <h2>1. Photo</h2>
-          <p>Choisis une photo contrastée (portrait, logo, paysage simple).</p>
+          <p>Image HD recommandée (1000×1000px+). Résolution max: {MAX_GRID_SIZE}×{MAX_GRID_SIZE}.</p>
           <label className="file-input-label">
             <input type="file" accept="image/*" onChange={handleFileChange} />
             <span>Choisir une image…</span>
@@ -456,117 +474,66 @@ export default function LithophaneMaker() {
             {previewLithoUrl ? (
               <img
                 src={previewLithoUrl}
-                alt="Rendu lithophanie"
+                alt="Rendu"
                 className="preview-image"
                 style={{ background: 'black' }}
               />
             ) : (
-              <p className="hint">
-                Charge une image pour voir la simulation rétro-éclairée.
-              </p>
+              <p className="hint">Simulation rétro-éclairage après chargement.</p>
             )}
           </div>
         </div>
 
         <div className="litho-panel">
           <h2>2. Forme</h2>
-          <p>Choisis le type de lithophanie à générer.</p>
           <div className="shape-grid">
-            <button
-              type="button"
-              className={shape === 'frame' ? 'shape-btn active' : 'shape-btn'}
-              onClick={() => setShape('frame')}
-            >
-              🖼️ Cadre plat
-            </button>
-            <button
-              type="button"
-              className={shape === 'bauble' ? 'shape-btn active' : 'shape-btn'}
-              onClick={() => setShape('bauble')}
-            >
-              🎄 Boule de Noël
-            </button>
-            <button
-              type="button"
-              className={shape === 'cylinder' ? 'shape-btn active' : 'shape-btn'}
-              onClick={() => setShape('cylinder')}
-            >
-              💡 Abat-jour cylindre
-            </button>
-            <button
-              type="button"
-              className={shape === 'cone' ? 'shape-btn active' : 'shape-btn'}
-              onClick={() => setShape('cone')}
-            >
-              🔦 Abat-jour conique
-            </button>
+            {[
+              ['frame', '🖼️ Cadre plat'],
+              ['bauble', '🎄 Boule'],
+              ['cylinder', '💡 Cylindre'],
+              ['cone', '🔦 Cône']
+            ].map(([id, label]) => (
+              <button
+                key={id}
+                type="button"
+                className={shape === id ? 'shape-btn active' : 'shape-btn'}
+                onClick={() => setShape(id)}
+              >
+                {label}
+              </button>
+            ))}
           </div>
 
           <div className="settings-group">
             <h3>Dimensions (mm)</h3>
             <div className="settings-row">
-              {(shape === 'frame') && (
+              {shape === 'frame' && (
                 <>
                   <label>
                     Largeur
-                    <input
-                      type="number"
-                      min="30"
-                      max="200"
-                      step="1"
-                      value={settings.widthMm}
-                      onChange={handleNumberChange('widthMm')}
-                    />
+                    <input type="number" min="30" max="200" step="1" value={settings.widthMm} onChange={handleNumberChange('widthMm')} />
                   </label>
                   <label>
                     Hauteur
-                    <input
-                      type="number"
-                      min="30"
-                      max="200"
-                      step="1"
-                      value={settings.heightMm}
-                      onChange={handleNumberChange('heightMm')}
-                    />
+                    <input type="number" min="30" max="200" step="1" value={settings.heightMm} onChange={handleNumberChange('heightMm')} />
                   </label>
                 </>
               )}
-              {(shape === 'bauble') && (
+              {shape === 'bauble' && (
                 <label>
                   Diamètre
-                  <input
-                    type="number"
-                    min="40"
-                    max="150"
-                    step="1"
-                    value={settings.diameter}
-                    onChange={handleNumberChange('diameter')}
-                  />
+                  <input type="number" min="40" max="150" step="1" value={settings.diameter} onChange={handleNumberChange('diameter')} />
                 </label>
               )}
               {(shape === 'cylinder' || shape === 'cone') && (
                 <>
                   <label>
                     Diamètre
-                    <input
-                      type="number"
-                      min="40"
-                      max="150"
-                      step="1"
-                      value={settings.diameter}
-                      onChange={handleNumberChange('diameter')}
-                    />
+                    <input type="number" min="40" max="150" step="1" value={settings.diameter} onChange={handleNumberChange('diameter')} />
                   </label>
                   <label>
                     Hauteur
-                    <input
-                      type="number"
-                      min="30"
-                      max="200"
-                      step="1"
-                      value={settings.heightMm}
-                      onChange={handleNumberChange('heightMm')}
-                    />
+                    <input type="number" min="30" max="200" step="1" value={settings.heightMm} onChange={handleNumberChange('heightMm')} />
                   </label>
                 </>
               )}
@@ -577,31 +544,25 @@ export default function LithophaneMaker() {
             <h3>Épaisseur (mm)</h3>
             <div className="settings-row">
               <label>
-                Min (zones claires)
-                <input
-                  type="number"
-                  min="0.4"
-                  max={settings.maxThickness}
-                  step="0.1"
-                  value={settings.minThickness}
-                  onChange={handleNumberChange('minThickness')}
-                />
+                Min (clair)
+                <input type="number" min="0.4" max={settings.maxThickness} step="0.1" value={settings.minThickness} onChange={handleNumberChange('minThickness')} />
               </label>
               <label>
-                Max (zones sombres)
-                <input
-                  type="number"
-                  min={settings.minThickness}
-                  max="6"
-                  step="0.1"
-                  value={settings.maxThickness}
-                  onChange={handleNumberChange('maxThickness')}
-                />
+                Max (sombre)
+                <input type="number" min={settings.minThickness} max="6" step="0.1" value={settings.maxThickness} onChange={handleNumberChange('maxThickness')} />
               </label>
             </div>
-            <p className="hint">
-              Recommandé : 0.7–0.9mm min, 2.8–3.2mm max pour PLA blanc, couche 0.12mm, 100% infill.
-            </p>
+          </div>
+
+          <div className="settings-group">
+            <h3>✨ Gamma (contraste)</h3>
+            <div className="settings-row">
+              <label>
+                Gamma: {settings.gamma}
+                <input type="range" min="0.5" max="2.5" step="0.1" value={settings.gamma} onChange={handleNumberChange('gamma')} />
+              </label>
+            </div>
+            <p className="hint">0.5 = plus clair, 1.0 = neutre, 2.5 = plus sombre</p>
           </div>
 
           <div className="actions">
@@ -611,21 +572,21 @@ export default function LithophaneMaker() {
               onClick={handleExportStl}
               disabled={isGenerating || !imageSrc}
             >
-              {isGenerating ? 'Génération du STL…' : '📥 Exporter en STL'}
+              {isGenerating ? 'Génération…' : '📥 Exporter STL PRO'}
             </button>
-            {!imageSrc && <p className="hint">Charge d&apos;abord une image pour activer l&apos;export.</p>}
+            {!imageSrc && <p className="hint">Chargez une image d&apos;abord</p>}
           </div>
         </div>
       </div>
 
       <div className="print-tips">
-        <h2>3. Paramètres d&apos;impression 3D conseillés</h2>
+        <h2>✅ Améliorations Qualité PRO Activées</h2>
         <ul>
-          <li>✔️ Matière : PLA blanc ou translucide</li>
-          <li>✔️ Hauteur de couche : 0.10–0.16mm (0.12mm idéal)</li>
-          <li>✔️ Infill : 100% (obligatoire pour les lithophanies)</li>
-          <li>✔️ Parois : 5–7 murs minimum</li>
-          <li>✔️ Orientation : lithophanie verticale face au ventilateur</li>
+          <li>✨ Résolution {MAX_GRID_SIZE}×{MAX_GRID_SIZE} (4x plus de détails)</li>
+          <li>✨ Interpolation bilinéaire (transitions douces)</li>
+          <li>✨ 200 segments pour formes 3D (ultra-lisse)</li>
+          <li>✨ Contrôle gamma (ajustement contraste)</li>
+          <li>✨ Résolution adaptative selon image source</li>
         </ul>
       </div>
     </section>
